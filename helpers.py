@@ -3,6 +3,8 @@ from validation_strings import message_strings
 import bcrypt
 import logging
 from database import execute_query
+import re
+import secrets
 
 async def build_response(message: str, status, status_code, data=None):
     # Check if the status is a boolean, if not, convert it to a string
@@ -75,33 +77,15 @@ def hash_password(password: str) -> str:
 
 async def extract_payload_data(form_data):
     try:
-        fcm_token = form_data.get('fcm_token', None)
-        mobile_os = form_data.get('mobile_os', None)
-        version = form_data.get('mobile_version', None)
-        app_version = form_data.get('app_version', None)
-        manufacturer = form_data.get('manufacturer', None)
-        model = form_data.get('model', None)
-        mobile = int(form_data.get('mobile_no'))
+        mobile = form_data.get('mobile_no')
         otp = form_data.get('otp')
-        is_native_app = form_data.get('is_native_app')
-        
-        extracted_data = {
-            "fcm_token": fcm_token, "mobile_os": mobile_os, "version": version,
-            "app_version": app_version, "manufacturer": manufacturer, "model": model,
-            "is_native_app": is_native_app
-        }
-        
-        logging.info(f"Extracted payload: {extracted_data}")
-        return mobile, otp, extracted_data
+        return mobile, otp
 
     except Exception as e:
         logging.error(f"Error extracting payload data: {str(e)}")
         raise ValueError(message_strings['invalid_values'])
     
 async def validate_otp(mobile, otp):
-    if isinstance(mobile, int) and otp == "123456":
-        return True
-    
     validate_query = "SELECT id FROM validate_otp WHERE mobile = $1 AND otp = $2"
     validate_obj = await execute_query(validate_query, (mobile, otp), flag='get')
     return bool(validate_obj)
@@ -113,7 +97,7 @@ async def get_user_data(mobile):
     user_data = await execute_query(user_query, (mobile,), flag='get')
     
     if user_data:
-        user_id = user_data[0]['id']
+        user_id = user_data[0]['user_id']
         token = await create_token(user_id)
         return user_data, token
     return None, None
@@ -132,25 +116,18 @@ async def create_token(user_id):
 async def prepare_response_data(user_data, token):
     responsedata = {
         'token': token,
-        'user_id': user_data[0]['id'],
-        'name': user_data[0]['name'],
-        'country_code': user_data[0]['country_code'],
-        'mobile': user_data[0]['mobile'],
-        'address': user_data[0]['address'],
-        'gender': user_data[0]['gender'],
-        'email': user_data[0]['email'],
-        'photo': user_data[0]['photo'],
-        'is_deleted': user_data[0]['is_deleted'],
-        'ref_code': user_data[0]['ref_code'],
-        'ref_by_code': user_data[0]['ref_by_code']
+        'user_id': user_data[0]['user_id'],
+        'name': user_data[0]['username'],
+        'mobile': user_data[0]['mobile_no'],
+        'email': user_data[0]['email']
     }
     
     responsedata = await null_to_string([responsedata])
     return responsedata[0]
 
 
-async def null_to_string(list_of_dict):
-    data = list_of_dict
+async def null_to_string(dict):
+    data = dict
     for dictionary in data:
         for k,v in dictionary.items():
             if v==None:
@@ -158,3 +135,71 @@ async def null_to_string(list_of_dict):
             else:
                 dictionary[k] = v
     return data
+
+
+async def extract_form_data(request):
+    form_data = await request.form()
+    form_data = await check_for_duplicate_keys(form_data)
+    return form_data
+
+
+async def check_for_duplicate_keys(payload):
+    seen_keys = set()
+    duplicates = set()
+
+    # Iterate over the raw FormData object
+    for key, value in payload.multi_items():
+        if key in seen_keys:
+            duplicates.add(key)
+        else:
+            seen_keys.add(key)
+
+    if duplicates:
+        return None
+    else:
+        return payload
+    
+async def validate_data(data, type='send'):
+    # Define validation rules based on the type
+    if type == 'verify':
+        validation_rules = {
+            'mobile_no': {
+                'check': lambda value: value and validate_mob(value),
+                'message': message_strings["mobile_empty"]
+            },
+            'otp': {
+                'check': lambda value: value,
+                'message': message_strings["otp_empty"]
+            }
+        }
+    else:  # Default validation for 'send' type
+        validation_rules = {
+            'mobile_no': {
+                'check': lambda value: value and validate_mob(value),
+                'message': message_strings["mobile_empty"]
+            }
+        }
+    
+    # Initialize validation result and message
+    message = ""
+    try:
+        validdata = True
+        for key, rule in validation_rules.items():
+            value = data.get(key)
+            if not rule['check'](value):
+                message = rule['message']
+                validdata = False
+                break  # Exit loop on first validation failure
+        return message, validdata
+    except KeyError as e:
+        message = f"field required {e}"
+        return message, False
+
+        
+def validate_mob(mobile):
+    return True if re.findall('^[6789]\d{9}$', mobile) else False
+
+
+async def otp_util(n):
+    otp = ''.join(secrets.choice("0123456789") for _ in range(n))
+    return otp

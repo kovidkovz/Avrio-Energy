@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import os
 import uvicorn
 
-from services import list_tasks_logic, create_task_logic, update_task_logic, delete_task_logic, order_tasks_logic
+from services import list_tasks_logic, create_task_logic, update_task_logic, delete_task_logic, order_tasks_logic, user_registration_logic, verify_otp_logic
 
 
 
@@ -32,10 +32,19 @@ async def delete_task(request: Request):
     return JSONResponse(content=payload, status_code=status_code)
 
 @app.get(api_routes.ORDER_TASKS)
-async def order_tasks(request: Request, order_by: str):
-    payload, status_code = await order_tasks_logic(request, order_by)
+async def order_tasks(request: Request):
+    payload, status_code = await order_tasks_logic(request)
     return JSONResponse(content=payload, status_code=status_code)
 
+@app.post(api_routes.REGISTER_USER)
+async def register_user(request : Request):
+    payload, status_code = await user_registration_logic(request)
+    return JSONResponse(content=payload, status_code= status_code)
+
+@app.get(api_routes.VALIDATE_OTP)
+async def verify_otp(request: Request):
+    payload, status_code = await verify_otp_logic(request)
+    return JSONResponse(content= payload, status_code= status_code)
 
 if __name__ == "__main__":
     is_debug = os.getenv("DEBUG", "0") == "1"

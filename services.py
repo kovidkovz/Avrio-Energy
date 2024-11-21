@@ -1,8 +1,8 @@
 from database import execute_query
 import logging
-from helpers import jwt_verifier, hash_password, build_response, extract_payload_data, validate_otp, get_user_data
+from helpers import jwt_verifier, hash_password, build_response, extract_payload_data, validate_otp, get_user_data, prepare_response_data, extract_form_data, check_for_duplicate_keys, validate_data, otp_util
 from validation_strings import message_strings
-
+import datetime as dt
 
 
 
@@ -11,29 +11,30 @@ async def user_registration_logic(request):
     logging.info("Received request for user registration")
 
     try:
-        payload = await request.json()
+        payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
         # Validate required fields
-        username = payload.get("username")
+        username = payload.get("name")
         email = payload.get("email")
         password = payload.get("password")
+        mobile = payload.get("mobile_no")
 
-        if not username or not email or not password:
+        if not username or not email or not password or not mobile:
             return await build_response(
-                message="Username, email, and password are required",
+                message="Username, email, password and mobile number are required",
                 status=message_strings["status_0"],
                 status_code=400
             )
 
         # Check if the user already exists
         existing_user_check = await execute_query(
-            "SELECT id FROM users WHERE email = $1", params=(email,), flag="get"
+            "SELECT user_id FROM users WHERE mobile_no = $1", (mobile,), flag="get"
         )
 
         if existing_user_check:
             return await build_response(
-                message="User with this email already exists",
+                message="User with this mobile already exists",
                 status=message_strings["status_0"],
                 status_code=400
             )
@@ -43,12 +44,12 @@ async def user_registration_logic(request):
 
         # Insert the new user into the database
         insert_user_query = """
-            INSERT INTO users (username, email, password) 
-            VALUES ($1, $2, $3) 
-            RETURNING id, username, email
+            INSERT INTO users (username, email, password_hash, mobile_no) 
+            VALUES ($1, $2, $3, $4) 
+            RETURNING user_id
         """
         new_user = await execute_query(
-            insert_user_query, params=(username, email, hashed_password), flag="insert"
+            insert_user_query, params=(username, email, hashed_password, mobile,), flag="insert"
         )
 
         if not new_user:
@@ -58,15 +59,24 @@ async def user_registration_logic(request):
                 status_code=400
             )
 
-        logging.info(f"User registered successfully: {new_user}")
-
-        # Return successful response
-        return await build_response(
-            message="User registered successfully",
-            status=message_strings["status_1"],
-            data=new_user,
-            status_code=200
-        )
+        else:
+            otp_payload = {"mobile_no": mobile}
+            
+            # Generate OTP and send to mobile
+            response = await generate_otp_logic(data=otp_payload)
+            
+            if response[1] == 200:  # OTP generation success        
+                logging.info(f"User registeration successfull for id: {new_user}")
+                
+                otp = response[0]['data'].get('otp')
+                new_user['otp'] = otp
+                # Return successful response
+                return await build_response(
+                    message="User registered successfully",
+                    status=message_strings["status_1"],
+                    data= new_user,
+                    status_code=200,    
+                )
 
     except Exception as e:
         logging.error(f"Unexpected error in user_registration_logic: {e}")
@@ -127,12 +137,12 @@ async def create_task_logic(request):
         if isinstance(user_id, tuple):
             return user_id
 
-        payload = await request.json()
+        payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
         title = payload.get("title")
-        description = payload.get("description", "")
-        status = payload.get("status", "To Do")
+        description = payload.get("description")
+        status = payload.get("status")
         due_date = payload.get("due_date")
 
         if not title or not due_date:
@@ -142,12 +152,13 @@ async def create_task_logic(request):
                 status_code=400
             )
 
+        due_date = dt.datetime.strptime(due_date, "%y-%m-%d").date()
         query = """
-            INSERT INTO tasks (title, description, status, due_date, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
-            RETURNING id
+            INSERT INTO tasks (title, description, status, due_date, created_at, updated_at, user_id)
+            VALUES ($1, $2, $3, $4, NOW(), NOW(), $5)
+            RETURNING task_id
         """
-        task_id = await execute_query(query, params=(title, description, status, due_date), flag="insert")
+        task_id = await execute_query(query, params=(title, description, status, due_date, user_id), flag="insert")
 
         if not task_id:
             return await build_response(
@@ -160,7 +171,7 @@ async def create_task_logic(request):
         return await build_response(
             message="Task created successfully",
             status=message_strings["status_1"],
-            data={"task_id": task_id.get("id")},
+            data={"task_id": task_id.get("task_id")},
             status_code=201
         )
     except Exception as e:
@@ -182,7 +193,7 @@ async def update_task_logic(request):
         if isinstance(user_id, tuple):
             return user_id
 
-        payload = await request.json()
+        payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
         task_id = payload.get("task_id")
@@ -241,7 +252,7 @@ async def delete_task_logic(request):
         if isinstance(user_id, tuple):
             return user_id
 
-        payload = await request.json()
+        payload = request.query_params
         logging.info(f"Payload received: {payload}")
 
         task_id = payload.get("task_id")
@@ -290,7 +301,7 @@ async def order_tasks_logic(request):
         if isinstance(user_id, tuple):
             return user_id
 
-        payload = await request.json()
+        payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
         task_id = payload.get("task_id")
@@ -375,7 +386,7 @@ async def verify_otp_logic(request):
                 status_code=400
             )
         
-        mobile, otp, extracted_data = await extract_payload_data(form_data)
+        mobile, otp = await extract_payload_data(form_data)
         if not mobile or not otp:
             return await build_response(message="Mobile number or OTP missing", status=False, status_code=400)
         
@@ -398,15 +409,89 @@ async def verify_otp_logic(request):
         responsedata = await prepare_response_data(user_data, token)
 
         return await build_response(
-            message="Mobile verified and details updated",
+            message="Mobile verified",
             status=True,
             status_code=200,
-            data= {
-                'token' : token,
-            }
+            data= responsedata
         )
     
     except Exception as e:
         logging.error(f"Error at verify_otp: {str(e)}")
         return await build_response(message=str(e), status=False, status_code=400)
 
+
+# Generate otp logic
+async def generate_otp_logic(request=None, data=None):
+    logging.info('Received request for generating OTP')
+    try:
+        if request:
+            try:
+                data = await request.json()
+                logging.info("Received JSON payload for OTP generation")
+            except Exception:
+                data = await request.form()
+                # Check for duplicate values
+                data = await check_for_duplicate_keys(data)
+                if data == None:
+                    return await build_response(
+                        message= message_strings[ 'duplicate_values'],
+                        status= message_strings['status_0'],
+                        status_code= 400
+                    )
+
+                logging.info("Fallback to form data for OTP generation")
+
+        if not data:
+            raise ValueError("No data provided for OTP generation")
+
+        message, validdata = await validate_data(data, 'send')
+        logging.info('Validating data')
+
+        if not validdata:
+            return await build_response(message=message, status=message_strings['status_0'], status_code=400)
+
+        mobile_no = data.get('mobile_no')
+
+        # Check if the user exists in the 'user' table
+        validate_user_query = """
+            SELECT user_id FROM users WHERE mobile_no = $1
+        """
+        validate_user_params = (mobile_no,)
+        user_exists = await execute_query(query=validate_user_query, params=validate_user_params, flag='get')
+
+        if not user_exists:
+            # User does not exist, return is_registered = 0
+            return await build_response(
+                message='otp not generated',
+                status=message_strings['status_1'],
+                status_code=200
+            )
+
+        # Otp generate logic
+        otp = await otp_util(6)
+        logging.info(f"Generated OTP: {otp}")
+
+        create_date = dt.datetime.now()
+        update_date = dt.datetime.now()
+
+        # Check if a record exists in the validate_otp table
+        validation_query = """
+            INSERT INTO validate_otp (mobile, otp, created, updated)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (mobile)
+            DO UPDATE SET otp = EXCLUDED.otp, updated = EXCLUDED.updated
+            RETURNING id
+        """
+        query_params = (mobile_no, otp, create_date, update_date)
+        await execute_query(query=validation_query, params=query_params, flag='insert')
+
+        return await build_response(
+            message="OTP sent successfully",
+            status=message_strings['status_1'],
+            status_code=200,
+            data = {'otp' : otp}
+        )
+
+    except Exception as e:
+        logging.error(f"Error in generate_otp_logic: {str(e)}")
+        return await build_response(message=str(e), status=message_strings['status_0'], status_code=400)

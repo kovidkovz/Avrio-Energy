@@ -10,11 +10,11 @@ async def create_pool():
     global pool
     if pool is None:  # Check if the pool is already created
         pool = await asyncpg.create_pool(
-            user=config.PG_USER,
-            password=config.PG_PASSWORD,
-            host=config.PG_HOST,
-            port=config.PG_PORT,
-            database=config.PG_NAME,
+            user="postgres",
+            password="berzerk@27",
+            host="127.0.0.1",
+            port=5432,
+            database="task management",
             min_size=4,
             max_size=8,
             statement_cache_size=0
