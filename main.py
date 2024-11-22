@@ -21,7 +21,7 @@ async def create_task(request: Request):
     payload, status_code = await create_task_logic(request)
     return JSONResponse(content=payload, status_code=status_code)
 
-@app.put(api_routes.UPDATE_TASK)
+@app.patch(api_routes.UPDATE_TASK)
 async def update_task(request: Request):
     payload, status_code = await update_task_logic(request)
     return JSONResponse(content=payload, status_code=status_code)

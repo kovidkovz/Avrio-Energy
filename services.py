@@ -3,6 +3,7 @@ import logging
 from helpers import jwt_verifier, hash_password, build_response, extract_payload_data, validate_otp, get_user_data, prepare_response_data, extract_form_data, check_for_duplicate_keys, validate_data, otp_util
 from validation_strings import message_strings
 import datetime as dt
+import json
 
 
 
@@ -88,7 +89,7 @@ async def user_registration_logic(request):
 
 
 # list tasks
-async def list_tasks_logic(request, status=None):
+async def list_tasks_logic(request):
     logging.info("Received request to list tasks")
 
     try:
@@ -96,14 +97,17 @@ async def list_tasks_logic(request, status=None):
         if isinstance(user_id, tuple):
             return user_id
 
+        payload = request.query_params
+        status = payload.get('status')
+        
         logging.info(f"User ID: {user_id}, Status filter: {status}")
 
-        query = "SELECT * FROM tasks"
+        query = "SELECT * FROM tasks where user_id = $1 "
         if status:
-            query += " WHERE status = $1"
-            tasks = await execute_query(query, params=(status,), flag="get")
+            query += "and status = $2"
+            tasks = await execute_query(query, params=(user_id,status,), flag="get")
         else:
-            tasks = await execute_query(query, flag="get")
+            tasks = await execute_query(query, (user_id,), flag="get")
 
         if not tasks:
             return await build_response(
@@ -112,11 +116,17 @@ async def list_tasks_logic(request, status=None):
                 status_code=404
             )
 
+        serialized_data = [
+                {key: (value.isoformat() if isinstance(value, dt.datetime) else value)
+                for key, value in item.items()}
+                for item in tasks
+            ]
+        
         logging.info(f"Tasks retrieved: {tasks}")
         return await build_response(
             message="Tasks retrieved successfully",
             status=message_strings["status_1"],
-            data=tasks,
+            data= serialized_data,
             status_code=200
         )
     except Exception as e:
@@ -140,10 +150,19 @@ async def create_task_logic(request):
         payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
-        title = payload.get("title")
-        description = payload.get("description")
-        status = payload.get("status")
-        due_date = payload.get("due_date")
+        try:
+            title = payload.get("title")
+            description = payload.get("description")
+            status = payload.get("status")
+            due_date = payload.get("due_date")
+        
+        except Exception as e:
+            logging.info(f"error {e}")
+            return await build_response(
+                message= 'please add priority',
+                status= message_strings['status_0'],
+                status_code= 400
+            )
 
         if not title or not due_date:
             return await build_response(
@@ -196,8 +215,20 @@ async def update_task_logic(request):
         payload = await request.form()
         logging.info(f"Payload received: {payload}")
 
-        task_id = payload.get("task_id")
-        fields_to_update = {key: value for key, value in payload.items() if key != "task_id" and value is not None}
+        try:
+            task_id = int(payload.get("task_id"))
+            due_date = dt.datetime.strptime(payload.get('due_date'), "%y-%m-%d").date()
+            
+        except Exception as e:
+            logging.info(f'error {e}')
+            return await build_response(
+                message= 'invalid task id or date',
+                status= message_strings['status_0'],
+                status_code= 400
+            )
+            
+        # Prepare fields to update and convert due_date
+        fields_to_update = {key: value for key, value in payload.items() if key != "task_id" and key != "due_date" and value is not None}
 
         if not task_id:
             return await build_response(
@@ -213,10 +244,10 @@ async def update_task_logic(request):
                 status_code=400
             )
 
-        set_clause = ", ".join([f"{key} = ${i+2}" for i, key in enumerate(fields_to_update.keys())])
-        query = f"UPDATE tasks SET {set_clause}, updated_at = NOW() WHERE id = $1 RETURNING id"
+        set_clause = ", ".join([f"{key} = ${i+4}" for i, key in enumerate(fields_to_update.keys())])
+        query = f"UPDATE tasks SET {set_clause}, due_date = $3, updated_at = NOW() WHERE task_id = $1 and user_id = $2 RETURNING task_id"
 
-        params = [task_id] + list(fields_to_update.values())
+        params = [task_id, user_id, due_date] + list(fields_to_update.values())
         result = await execute_query(query, params=tuple(params), flag="update")
 
         if not result:
@@ -230,7 +261,7 @@ async def update_task_logic(request):
         return await build_response(
             message="Task updated successfully",
             status=message_strings["status_1"],
-            data={"task_id": result.get("id")},
+            data={"task_id": result.get("task_id")},
             status_code=200
         )
     except Exception as e:
@@ -255,7 +286,16 @@ async def delete_task_logic(request):
         payload = request.query_params
         logging.info(f"Payload received: {payload}")
 
-        task_id = payload.get("task_id")
+        try:
+            task_id = int(payload.get("task_id"))
+        
+        except Exception as e:
+            logging.info(f'error {e}')
+            return await build_response(
+                message= 'Invalid task id',
+                status= message_strings['status_0'],
+                status_code= 400
+            )
 
         if not task_id:
             return await build_response(
@@ -264,8 +304,8 @@ async def delete_task_logic(request):
                 status_code=400
             )
 
-        query = "DELETE FROM tasks WHERE id = $1 RETURNING id"
-        result = await execute_query(query, params=(task_id,), flag="delete")
+        query = "DELETE FROM tasks WHERE task_id = $1 and user_id = $2 RETURNING task_id"
+        result = await execute_query(query, params=(task_id, user_id,), flag="delete")
 
         if not result:
             return await build_response(
@@ -274,11 +314,11 @@ async def delete_task_logic(request):
                 status_code=404
             )
 
-        logging.info(f"Task {task_id} deleted successfully")
+        logging.info(f"Task {task_id} deleted successfully for user {user_id}")
         return await build_response(
             message="Task deleted successfully",
             status=message_strings["status_1"],
-            data={"task_id": result.get("id")},
+            data={"task_id": result.get("task_id")},
             status_code=200
         )
     except Exception as e:
@@ -290,87 +330,66 @@ async def delete_task_logic(request):
         )
 
 
-
-
-# order task
 async def order_tasks_logic(request):
     logging.info("Received request to order tasks")
 
     try:
+        # Verify the user using JWT
         user_id = await jwt_verifier(request)
         if isinstance(user_id, tuple):
             return user_id
 
+        # Get ordering preference from the request (query param or form field)
         payload = await request.form()
-        logging.info(f"Payload received: {payload}")
+        order_by = payload.get('order_by', 'created_at')  # Default to 'created_at'
 
-        task_id = payload.get("task_id")
-        position = payload.get("position")
-
-        if not task_id or position is None:
+        # Validate the order_by value
+        if order_by not in ['created_at', 'due_date']:
             return await build_response(
-                message="Task ID and position are required",
+                message="Invalid order_by value. Allowed values are 'created_at' or 'due_date'.",
                 status=message_strings["status_0"],
                 status_code=400
             )
 
-        # Ensure the position is a valid integer (e.g., 1st, 2nd, etc.)
-        if not isinstance(position, int) or position < 1:
-            return await build_response(
-                message="Position must be a positive integer",
-                status=message_strings["status_0"],
-                status_code=400
-            )
+        # Query to get the current list of tasks ordered by the chosen column
+        query = f"""
+            SELECT * FROM tasks 
+            WHERE user_id = $1 AND status != $2 
+            ORDER BY {order_by} ASC
+        """
+        current_tasks = await execute_query(query, (user_id, 'Done',), flag="get")
 
-        # Query to get the current list of tasks ordered by priority or created_at
-        current_tasks = await execute_query(
-            "SELECT id FROM tasks ORDER BY priority DESC, created_at ASC", flag="get"
-        )
-
-        # Check if the task_id is valid and exists
-        if not current_tasks or task_id not in [task['id'] for task in current_tasks]:
+        # Check if tasks exist
+        if not current_tasks:
             return await build_response(
-                message="Task ID not found",
+                message="Tasks not found",
                 status=message_strings["status_0"],
                 status_code=404
             )
 
-        # Reordering logic based on the provided position
-        # For simplicity, we will adjust the priority based on the requested position.
-        # This could be more complex if you're tracking specific priorities in the database.
-        # Here, we are simply shifting other tasks up/down to make room for the reordered task.
+        # Serialize datetime objects in the retrieved tasks
+        serialized_data = [
+            {key: (value.isoformat() if isinstance(value, dt.datetime) else value)
+             for key, value in item.items()}
+            for item in current_tasks
+        ]
 
-        # First, let's update the task's position (or priority)
-        query = """
-            UPDATE tasks 
-            SET priority = $1, updated_at = NOW() 
-            WHERE id = $2 
-            RETURNING id
-        """
-        result = await execute_query(query, params=(position, task_id), flag="update")
-
-        if not result:
-            return await build_response(
-                message="Task ordering failed",
-                status=message_strings["status_0"],
-                status_code=400
-            )
-
-        logging.info(f"Task {task_id} ordered successfully with position {position}")
+        logging.info("Tasks retrieved successfully")
         return await build_response(
-            message="Task ordered successfully",
+            message="Tasks ordered successfully",
             status=message_strings["status_1"],
-            data={"task_id": result.get("id")},
+            data=serialized_data,
             status_code=200
         )
 
     except Exception as e:
-        logging.error(f"Unexpected error in order_task_logic: {e}")
+        logging.error(f"Unexpected error in order_tasks_logic: {e}")
         return await build_response(
-            message= message_strings['internal_error'],
+            message=message_strings['internal_error'],
             status=message_strings["status_0"],
             status_code=400
         )
+
 
     
 # verify otp logic
