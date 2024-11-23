@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import os
 import uvicorn
 
-from services import list_tasks_logic, create_task_logic, update_task_logic, delete_task_logic, order_tasks_logic, user_registration_logic, verify_otp_logic
+from services import list_tasks_logic, create_task_logic, update_task_logic, delete_task_logic, order_tasks_logic, user_registration_logic, verify_otp_logic, generate_otp_logic
 
 
 
@@ -44,6 +44,11 @@ async def register_user(request : Request):
 @app.get(api_routes.VALIDATE_OTP)
 async def verify_otp(request: Request):
     payload, status_code = await verify_otp_logic(request)
+    return JSONResponse(content= payload, status_code= status_code)
+
+@app.post(api_routes.GENERATE_OTP)
+async def generate_otp(request : Request):
+    payload, status_code = await generate_otp_logic(request)
     return JSONResponse(content= payload, status_code= status_code)
 
 if __name__ == "__main__":

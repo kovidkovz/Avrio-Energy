@@ -30,12 +30,12 @@ async def user_registration_logic(request):
 
         # Check if the user already exists
         existing_user_check = await execute_query(
-            "SELECT user_id FROM users WHERE mobile_no = $1", (mobile,), flag="get"
+            "SELECT user_id FROM users WHERE mobile_no = $1 or email = $2", (mobile, email,), flag="get"
         )
 
         if existing_user_check:
             return await build_response(
-                message="User with this mobile already exists",
+                message="User with this mobile or email already exists",
                 status=message_strings["status_0"],
                 status_code=400
             )
