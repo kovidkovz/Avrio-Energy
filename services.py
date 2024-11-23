@@ -159,7 +159,7 @@ async def create_task_logic(request):
         except Exception as e:
             logging.info(f"error {e}")
             return await build_response(
-                message= 'please add priority',
+                message= 'Enter correct values',
                 status= message_strings['status_0'],
                 status_code= 400
             )

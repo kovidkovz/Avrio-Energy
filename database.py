@@ -15,8 +15,8 @@ async def create_pool():
             host= config.PG_HOST,
             port= config.PG_PORT,
             database= config.PG_NAME,
-            min_size= 4,
-            max_size= 8,
+            min_size= 16,
+            max_size= 32,
             statement_cache_size= 0
         )
         logging.info("PostgreSQL connection pool initialized")
