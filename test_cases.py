@@ -7,14 +7,15 @@ client = TestClient(app)
 
 
 # Test for user registration
-# def test_register_user():
-#     response = client.post(
-#         "/tasks/register_user", 
-#         data={"name": "Noel", "email": "giosdfs@1234", "password": "password123", "mobile_no": "9510175265"}
-#     )
-#     assert response.status_code == 200
-#     assert "User registered successfully" in response.json()["message"]
+def test_register_user():
+    response = client.post(
+        "/tasks/register_user", 
+        data={"name": "Noel", "email": "giosdfs@1234", "password": "password123", "mobile_no": "9510175265"}
+    )
+    assert response.status_code == 200
+    assert "User registered successfully" in response.json()["message"]
 
+# jwt token of a particular user
 headers = {
         "authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxOH0.hpX6F0AT41zRqPg08lAOEdFOw2RiFVUZZdpsJuGqEc8"
     }
@@ -36,18 +37,18 @@ def test_list_tasks():
     assert "Tasks retrieved successfully" in response.json()["message"]
 
 
-# # Test for task update
-# def test_update_task():
-#     response = client.patch(
-#         "tasks/update_task", 
-#         data={"task_id": 8, "title": "Life of pie", "description" : 'finally done', "status": "Done", "due_date": "25-11-24"}, headers= headers
-#     )
-#     assert response.status_code == 200
-#     assert "Task updated successfully" in response.json()["message"]
+# Test for task update
+def test_update_task():
+    response = client.patch(
+        "tasks/update_task", 
+        data={"task_id": 8, "title": "Life of pie", "description" : 'finally done', "status": "Done", "due_date": "25-11-24"}, headers= headers
+    )
+    assert response.status_code == 200
+    assert "Task updated successfully" in response.json()["message"]
 
 
 # Test for task deletion
-# def test_delete_task():
-#     response = client.delete("tasks/delete_task" , params= {"task_id" : 10}, headers= headers)
-#     assert response.status_code == 200
-#     assert "Task deleted successfully" in response.json()["message"]
+def test_delete_task():
+    response = client.delete("tasks/delete_task" , params= {"task_id" : 10}, headers= headers)
+    assert response.status_code == 200
+    assert "Task deleted successfully" in response.json()["message"]
