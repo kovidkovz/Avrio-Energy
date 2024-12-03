@@ -171,14 +171,23 @@ async def create_task_logic(request):
                 status_code=400
             )
 
-        due_date = dt.datetime.strptime(due_date, "%y-%m-%d").date()
+        
+        due_date = dt.datetime.strptime(due_date, "%d-%m-%y").date()
+        
+        if due_date <= dt.datetime.now().date():
+            return await build_response(
+                message= f"Please enter a date greater than {due_date}",
+                status= message_strings['status_0'],
+                status_code = 400
+            )
+        
         query = """
             INSERT INTO tasks (title, description, status, due_date, created_at, updated_at, user_id)
             VALUES ($1, $2, $3, $4, NOW(), NOW(), $5)
             RETURNING task_id
         """
         task_id = await execute_query(query, params=(title, description, status, due_date, user_id), flag="insert")
-
+        
         if not task_id:
             return await build_response(
                 message="Task creation failed",
